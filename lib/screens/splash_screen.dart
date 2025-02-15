@@ -32,15 +32,9 @@ class _SplashScreenState extends State<SplashScreen> {
 
     await Future.delayed(Duration(seconds: 3, milliseconds: 500));
 
-    if (isLoggedIn == true && csrfToken != null && sessionCookie != null) {
-      if (userName != null && userName.isNotEmpty) {
-        Navigator.pushReplacementNamed(context, "/home");
-      } else {
-        Navigator.pushReplacementNamed(context, "/username");
-      }
-    } else {
-      Navigator.pushReplacementNamed(context, "/login");
-    }
+    Navigator.pushReplacementNamed(context, "/home");
+    // Navigator.push(
+    //     context, MaterialPageRoute(builder: (context) => ProductListScreen()));
   }
 
   @override

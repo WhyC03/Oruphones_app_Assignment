@@ -4,6 +4,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
+import 'package:provider/provider.dart';
+import 'package:oruphones_app/providers/auth_provider.dart';
 
 class AuthService {
   final String baseUrl = "http://40.90.224.241:5000";
@@ -30,7 +32,8 @@ class AuthService {
   }
 
   // Function to verify OTP & store session cookies
-  Future<bool> verifyOtp(String phoneNumber, String otp, BuildContext context) async {
+  Future<bool> verifyOtp(
+      String phoneNumber, String otp, BuildContext context) async {
     final url = Uri.parse("$baseUrl/login/otpValidate");
 
     final response = await http.post(
@@ -49,7 +52,6 @@ class AuthService {
       SharedPreferences prefs = await SharedPreferences.getInstance();
       await prefs.setBool("isLoggedIn", true);
 
-      // ✅ Store session cookie
       if (response.headers.containsKey("set-cookie")) {
         String? sessionCookie = response.headers["set-cookie"];
         if (sessionCookie != null) {
@@ -58,14 +60,11 @@ class AuthService {
         }
       }
 
-      // ✅ Fetch CSRF Token
       bool csrfFetched = await fetchCsrfToken();
       if (!csrfFetched) {
         debugPrint("Failed to fetch authentication data.");
         return false;
       }
-
-      // Check if username exists
       String? userName = prefs.getString("userName");
       if (userName != null && userName.isNotEmpty) {
         Navigator.pushReplacementNamed(context, "/home");
@@ -79,7 +78,6 @@ class AuthService {
     }
   }
 
-  // Fetch CSRF Token & Send Session Cookie
   Future<bool> fetchCsrfToken() async {
     SharedPreferences prefs = await SharedPreferences.getInstance();
     String? sessionCookie = prefs.getString("sessionCookie");
@@ -89,7 +87,7 @@ class AuthService {
     final response = await http.get(
       url,
       headers: {
-        "Cookie": sessionCookie ?? "", // ✅ Send stored session cookie
+        "Cookie": sessionCookie ?? "",
       },
     );
 
@@ -103,7 +101,6 @@ class AuthService {
         return false;
       }
 
-      // ✅ Save CSRF Token
       String csrfToken = jsonResponse["csrfToken"];
       await prefs.setString("csrfToken", csrfToken);
 
@@ -115,7 +112,6 @@ class AuthService {
     }
   }
 
-  // Function to update the user's name
   Future<bool> updateUserName(String name, BuildContext context) async {
     final url = Uri.parse("$baseUrl/update");
 
@@ -139,7 +135,7 @@ class AuthService {
       headers: {
         "Content-Type": "application/json",
         "X-Csrf-Token": csrfToken ?? "",
-        "Cookie": sessionCookie ?? "", // ✅ Send session cookie
+        "Cookie": sessionCookie ?? "",
       },
       body: jsonEncode({
         "countryCode": 91,
@@ -160,9 +156,173 @@ class AuthService {
     }
   }
 
-  // Function to get the stored user name
   Future<String?> getUserName() async {
     SharedPreferences prefs = await SharedPreferences.getInstance();
     return prefs.getString("userName");
+  }
+
+  //Logout Function
+  Future<void> logout(BuildContext context) async {
+    final url = Uri.parse("$baseUrl/logout");
+
+    SharedPreferences prefs = await SharedPreferences.getInstance();
+    String? csrfToken = prefs.getString("csrfToken");
+    String? sessionCookie = prefs.getString("sessionCookie");
+
+    final response = await http.get(
+      url,
+      headers: {
+        "X-Csrf-Token": csrfToken ?? "",
+        "Cookie": sessionCookie ?? "",
+      },
+    );
+
+    if (response.statusCode == 200) {
+      debugPrint("User logged out successfully.");
+
+      Icon(Icons.notifications_on_outlined);
+      await prefs.remove("isLoggedIn");
+      await prefs.remove("userName");
+      await prefs.remove("csrfToken");
+      await prefs.remove("sessionCookie");
+
+      // Update AuthProvider state
+      Provider.of<AuthProvider>(context, listen: false).logout(context);
+    } else {
+      debugPrint("Failed to log out: ${response.body}");
+    }
+  }
+
+  // Fetch products with filters
+  Future<List<dynamic>> fetchProducts({
+    List<String>? condition,
+    List<String>? brand,
+    List<int>? priceRange,
+    bool verified = false,
+    String? sortBy,
+    bool ascending = true,
+    int page = 1,
+    List<String>? storageOptions,
+    List<String>? ramOptions,
+    List<String>? warranties,
+  }) async {
+    final String baseUrl = "http://40.90.224.241:5000";
+    final url = Uri.parse("$baseUrl/filter");
+
+    log("Sending request to API: $url");
+
+    final response = await http.post(
+      url,
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: jsonEncode({
+        "filter": {
+          "condition": condition ?? [],
+          "make": brand ?? [],
+          "priceRange": priceRange ?? [],
+          "verified": verified,
+          "sort": sortBy != null ? {sortBy: ascending ? 1 : -1} : {},
+          "page": page,
+        }
+      }),
+    );
+
+    log("API Response Status: ${response.statusCode}");
+
+    if (response.statusCode == 200) {
+      final decodedResponse = jsonDecode(response.body);
+      // log("Full API Response: $decodedResponse");
+
+      if (decodedResponse is Map && decodedResponse.containsKey('data')) {
+        final List<dynamic> productList =
+            decodedResponse['data']['data']; // 🔥 FIXED: Extract nested data
+        // log("Extracted ${productList.length} products.");
+        return productList;
+      } else {
+        log("Unexpected API response format.");
+        return [];
+      }
+    } else {
+      log("API Error: ${response.body}");
+      throw Exception("Failed to fetch products");
+    }
+  }
+
+  // Like a product
+  Future<bool> likeProduct(String productId) async {
+    return _toggleLike(productId, isLiking: true);
+  }
+
+  // Unlike a product
+  Future<bool> unlikeProduct(String productId) async {
+    return _toggleLike(productId, isLiking: false);
+  }
+
+  // Common Like/Unlike function
+  Future<bool> _toggleLike(String productId, {required bool isLiking}) async {
+    final url =
+        Uri.parse("http://40.90.224.241:5000/favs"); // Corrected endpoint
+
+    log("Sending ${isLiking ? 'Like' : 'Unlike'} Request to: $url with ID: $productId");
+
+    SharedPreferences prefs = await SharedPreferences.getInstance();
+    String? csrfToken = prefs.getString("csrfToken");
+    String? sessionCookie = prefs.getString("sessionCookie");
+
+    try {
+      final response = await http.post(
+        url,
+        headers: {
+          "Content-Type": "application/json",
+          "X-Csrf-Token": csrfToken ?? "",
+          "Cookie": sessionCookie ?? "",
+        },
+        body: jsonEncode({
+          "listingId": productId,
+          "isFav": isLiking // Correct field name
+        }),
+      );
+
+      if (response.statusCode == 200) {
+        debugPrint("Product ${isLiking ? 'liked' : 'unliked'} successfully");
+        return true;
+      } else {
+        debugPrint(
+            "Failed to ${isLiking ? 'like' : 'unlike'} product: ${response.body}");
+        return false;
+      }
+    } catch (e) {
+      debugPrint("Error ${isLiking ? 'liking' : 'unliking'} product: $e");
+      return false;
+    }
+  }
+
+  // Get liked products
+  Future<List<dynamic>> getLikedProducts() async {
+    final url = Uri.parse("$baseUrl/products/liked");
+
+    SharedPreferences prefs = await SharedPreferences.getInstance();
+    String? sessionCookie = prefs.getString("sessionCookie");
+
+    try {
+      final response = await http.get(
+        url,
+        headers: {
+          "Cookie": sessionCookie ?? "",
+        },
+      );
+
+      if (response.statusCode == 200) {
+        var jsonResponse = jsonDecode(response.body);
+        return jsonResponse['likedProducts'] ?? [];
+      } else {
+        debugPrint("Failed to fetch liked products: ${response.body}");
+        return [];
+      }
+    } catch (e) {
+      debugPrint(" Error fetching liked products: $e");
+      return [];
+    }
   }
 }

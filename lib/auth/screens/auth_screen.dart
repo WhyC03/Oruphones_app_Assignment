@@ -2,6 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:oruphones_app/auth/screens/otp_screen.dart';
 import 'package:oruphones_app/auth/services/auth_service.dart';
 import 'package:oruphones_app/constants.dart';
+import 'package:oruphones_app/providers/auth_provider.dart';
+import 'package:provider/provider.dart';
+import 'package:oruphones_app/auth/screens/otp_provider.dart'; // Import OtpProvider
 
 class AuthScreen extends StatefulWidget {
   const AuthScreen({super.key});
@@ -138,11 +141,15 @@ class _AuthScreenState extends State<AuthScreen> {
                     Navigator.push(
                       context,
                       MaterialPageRoute(
-                        builder: (context) => OtpScreen(
-                          phoneNumber: phoneController.text,
+                        builder: (context) => ChangeNotifierProvider(
+                          create: (_) => OtpProvider(),
+                          child: OtpScreen(
+                            phoneNumber: phoneController.text,
+                          ),
                         ),
                       ),
                     );
+                    Provider.of<AuthProvider>(context, listen: false).login();
                   } else {
                     ScaffoldMessenger.of(context).showSnackBar(
                       SnackBar(
